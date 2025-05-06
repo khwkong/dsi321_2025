@@ -22,7 +22,7 @@ services:
 
   prefect-server:
     build:
-      context: ./make
+      context: ./prefect
       dockerfile: Dockerfile.prefect-worker
     command: prefect server start --host 0.0.0.0
     environment:
@@ -40,15 +40,15 @@ services:
 
   prefect-worker:
     build:
-      context: ./make
+      context: ./prefect
       dockerfile: Dockerfile.prefect-worker
     depends_on:
       - prefect-server
     environment:
       - PREFECT_API_URL=http://prefect-server:4200/api
     volumes:
-      - ./make/wait-for-server.sh:/wait-for-server.sh:ro
-      - ./work:/home/jovyan/work:rw
+      - ./prefect/wait-for-server.sh:/wait-for-server.sh:ro
+      - ./pipeline:/home/jovyan/work:rw
     entrypoint: ["/wait-for-server.sh"]
     deploy:
       mode: replicated
@@ -56,12 +56,12 @@ services:
 
   jupyter:
     build:
-      context: ./make
+      context: ./prefect
       dockerfile: Dockerfile.jupyter
     ports:
       - "8888:8888"
     volumes:
-      - ./work:/home/jovyan/work:rw
+      - ./pipeline:/home/jovyan/work:rw
     environment:
       - PREFECT_API_URL=http://prefect-server:4200/api
 
