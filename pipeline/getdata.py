@@ -6,14 +6,6 @@ from pathlib import Path
 from prefect import flow, task
 
 
-districts_gdf = gpd.read_file(Path(__file__).parent / 'bangkok_districts.geojson')
-
-if districts_gdf.crs is None:
-    districts_gdf.set_crs(epsg=4326, inplace=True)
-else:
-    districts_gdf = districts_gdf.to_crs(epsg=4326)
-
-
 @task
 def fetch_data() -> list[dict]:
     try:
@@ -29,7 +21,7 @@ def fetch_data() -> list[dict]:
 
 
 @task
-def data_processing(data: list[dict]) -> pd.DataFrame:
+def data_processing(data: list[dict], districts_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
     df = pd.DataFrame(data)
 
     print("Sample AQILast:")
@@ -92,7 +84,7 @@ def load_to_lakefs(df: pd.DataFrame, lakefs_s3_path: str, storage_options: dict)
     print(f"Storage options: {storage_options}")
 
     df['timestamp'] = df['timestamp'].dt.strftime('%d/%m/%Y %H:%M:%S')
-
+    
     df.insert(0, 'index', range(1, len(df) + 1))
 
     df.to_parquet(
@@ -107,30 +99,47 @@ def load_to_lakefs(df: pd.DataFrame, lakefs_s3_path: str, storage_options: dict)
 
 @flow(name='dust-concentration-pipeline', log_prints=True)
 def main_flow():
-    data = fetch_data()
-    df = data_processing(data)
+    try:
+        geojson_path = Path("/home/jovyan/work/bangkok_districts.geojson")
+        print(f"🔍 Loading GeoJSON from: {geojson_path}")
+        districts_gdf = gpd.read_file(geojson_path)
 
-    print(df.head())
+        if districts_gdf.crs is None:
+            districts_gdf.set_crs(epsg=4326, inplace=True)
+        else:
+            districts_gdf = districts_gdf.to_crs(epsg=4326)
+    except Exception as e:
+        print(f"❌ Failed to load GeoJSON: {e}")
+        return
 
-    ACCESS_KEY = "access_key"
-    SECRET_KEY = "secret_key"
-    lakefs_endpoint = "http://lakefs-dev:8000/"
+    try:
+        data = fetch_data()
+        df = data_processing(data, districts_gdf)
 
-    repo = "dust-concentration"
-    branch = "main"
-    path = "pm_data.parquet"
+        print(df.head())
 
-    lakefs_s3_path = f"s3a://{repo}/{branch}/{path}"
+        ACCESS_KEY = "access_key"
+        SECRET_KEY = "secret_key"
+        lakefs_endpoint = "http://lakefs-dev:8000/"
 
-    storage_options = {
-        "key": ACCESS_KEY,
-        "secret": SECRET_KEY,
-        "client_kwargs": {
-            "endpoint_url": lakefs_endpoint
+        repo = "dust-concentration"
+        branch = "main"
+        path = "pm_data.parquet"
+
+        lakefs_s3_path = f"s3a://{repo}/{branch}/{path}"
+
+        storage_options = {
+            "key": ACCESS_KEY,
+            "secret": SECRET_KEY,
+            "client_kwargs": {
+                "endpoint_url": lakefs_endpoint
+            }
         }
-    }
 
-    load_to_lakefs(df, lakefs_s3_path, storage_options)
+        load_to_lakefs(df, lakefs_s3_path, storage_options)
+    except Exception as e:
+        print(f"❌ Flow failed: {e}")
+        return  
 
 
 if __name__ == "__main__":
