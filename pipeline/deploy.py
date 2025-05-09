@@ -13,5 +13,5 @@ if __name__ == "__main__":
         name="dust_deployment",
         parameters={},
         work_pool_name="default-agent-pool",
-        cron="*/15 * * * *",  
+        cron="0 * * * *",  
     )
