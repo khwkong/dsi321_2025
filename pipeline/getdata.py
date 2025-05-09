@@ -91,10 +91,15 @@ def load_to_lakefs(df: pd.DataFrame, lakefs_s3_path: str, storage_options: dict)
     print(f"Saving to: {lakefs_s3_path}")
     print(f"Storage options: {storage_options}")
 
-    df.reset_index(drop=True).to_parquet(
+    df['timestamp'] = df['timestamp'].dt.strftime('%d/%m/%Y %H:%M:%S')
+
+    df.insert(0, 'index', range(1, len(df) + 1))
+
+    df.to_parquet(
         lakefs_s3_path,
         storage_options=storage_options,
-        partition_cols=['year', 'month', 'day', 'hour']
+        partition_cols=['year', 'month', 'day', 'hour'],
+        index=False
     )
 
     print("✅ Done saving to lakeFS.")
