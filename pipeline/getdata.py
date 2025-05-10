@@ -24,8 +24,20 @@ def fetch_data() -> list[dict]:
 def data_processing(data: list[dict], districts_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
     df = pd.DataFrame(data)
 
+    # check
+    if 'AQILast' not in df.columns:
+        print("❌ 'AQILast' column not found in the data. Skipping this run.")
+        return pd.DataFrame()
+
+    # check
+    if df['AQILast'].dropna().empty:
+        print("❌ 'AQILast' column is empty. Skipping this run.")
+        return pd.DataFrame()
+
     print("Sample AQILast:")
-    print(df['AQILast'].dropna().iloc[0])       
+    print(df['AQILast'].dropna().iloc[0])
+
+    # Flatten AQILast
     aqi_data = pd.json_normalize(df['AQILast'])
     df = pd.concat([df, aqi_data], axis=1)
 
@@ -42,9 +54,13 @@ def data_processing(data: list[dict], districts_gdf: gpd.GeoDataFrame) -> pd.Dat
         else:
             print(f"⚠️ Warning: Column '{col}' not found in DataFrame")
 
-    df['time'] = df['time'].mode()[0]
-    df['date'] = df['date'].mode()[0]
-    df['timestamp'] = pd.to_datetime(df['date'] + ' ' + df['time'])
+    if 'time' in df.columns and 'date' in df.columns:
+        df['time'] = df['time'].mode()[0]
+        df['date'] = df['date'].mode()[0]
+        df['timestamp'] = pd.to_datetime(df['date'] + ' ' + df['time'])
+    else:
+        print("❌ Missing 'time' or 'date' columns.")
+        return pd.DataFrame()
 
     df['year'] = df['timestamp'].dt.year
     df['month'] = df['timestamp'].dt.month
@@ -84,7 +100,7 @@ def load_to_lakefs(df: pd.DataFrame, lakefs_s3_path: str, storage_options: dict)
     print(f"Storage options: {storage_options}")
 
     df['timestamp'] = df['timestamp'].dt.strftime('%d/%m/%Y %H:%M:%S')
-    
+
     df.insert(0, 'index', range(1, len(df) + 1))
 
     df.to_parquet(
@@ -114,7 +130,16 @@ def main_flow():
 
     try:
         data = fetch_data()
+
+        if not data:
+            print("❌ No data fetched.")
+            return
+
         df = data_processing(data, districts_gdf)
+
+        if df.empty:
+            print("❌ Processed DataFrame is empty. Skipping load.")
+            return
 
         print(df.head())
 
