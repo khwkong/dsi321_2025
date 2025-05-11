@@ -9,3 +9,4 @@ fsspec==2025.3.2
 s3fs==2025.3.2
 geopandas==0.14.3
 fiona==1.9.5
+streamlit
