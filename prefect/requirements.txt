@@ -11,3 +11,4 @@ geopandas==0.14.3
 fiona==1.9.5
 streamlit
 streamlit-autorefresh
+streamlit-aggrid
