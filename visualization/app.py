@@ -9,7 +9,6 @@ from streamlit_autorefresh import st_autorefresh
 st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Kanit&display=swap');
-        
         html, body, div, p, label, input, textarea, button, h1, h2, h3, h4, h5, h6, span {
             font-family: 'Kanit', sans-serif !important;
         }
@@ -17,8 +16,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.subheader("รายงานคุณภาพอากาศภายในกรุงเทพมหานคร")
-
-st_autorefresh(interval=300000, key="refresh")
+st_autorefresh(interval=60000, key="refresh") 
 
 # ---------- lakeFS config ----------
 ACCESS_KEY = "access_key"
@@ -40,12 +38,10 @@ fs = fsspec.filesystem("s3", **storage_options)
 
 # ---------- Get latest partition path ----------
 def get_latest_partition_path():
-    # search all path
     paths = fs.glob(f"{base_path}/year=*/month=*/day=*/hour=*")
     if not paths:
         return None
-    
-    # sort
+
     def extract_datetime(p):
         parts = p.split("/")
         y = int(parts[-4].split("=")[1])
@@ -58,13 +54,23 @@ def get_latest_partition_path():
     return f"s3a://{latest_path}"
 
 # ---------- Load latest data ----------
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=1800) 
 def load_latest_data():
     latest_path = get_latest_partition_path()
     if latest_path is None:
         return pd.DataFrame()
-    
-    df = pd.read_parquet(latest_path, storage_options=storage_options)
+
+    try:
+        df = pd.read_parquet(latest_path, storage_options=storage_options)
+    except Exception as e:
+        st.warning(f"⚠️ ไม่สามารถโหลดไฟล์: {e}")
+        return pd.DataFrame()
+
+    required_columns = {'lat', 'long', 'timestamp'}
+    if not required_columns.issubset(df.columns):
+        st.warning("⚠️ ข้อมูลล่าสุดยังไม่ครบหรือยังเขียนไม่เสร็จ")
+        return pd.DataFrame()
+
     df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
     df['long'] = pd.to_numeric(df['long'], errors='coerce')
     df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
@@ -78,7 +84,6 @@ else:
     latest_time = df['timestamp'].max()
     df_latest = df[df['timestamp'] == latest_time]
 
-    # ---------- AQI level & color ----------
     def get_aqi_level_and_color(aqi):
         if aqi <= 50:
             return "Good", "#00E400"
@@ -93,19 +98,14 @@ else:
         else:
             return "Hazardous", "#7E0023"
 
-    # ---------- Apply AQI color to all latest data ----------
     df_latest["AQI_level"], df_latest["AQI_color"] = zip(*df_latest["AQI.aqi"].apply(get_aqi_level_and_color))
-
-    # ---------- Combined searchable list ----------
     df_latest['search_key'] = df_latest['nameTH'] + " (" + df_latest['district'] + ")"
     search_list = sorted(df_latest['search_key'].unique())
     default_location = "สำนักงานเขตคลองเตย (คลองเตย)"
     selected_search = st.selectbox("ค้นหาสถานที่หรือเขต", search_list, index=search_list.index(default_location))
 
-    # ---------- Filter data ----------
     df_filtered = df_latest[df_latest['search_key'] == selected_search]
 
-    # ---------- Display data ----------
     if df_filtered.empty:
         st.warning("❌ ไม่พบข้อมูลสำหรับพื้นที่ที่เลือก")
     else:
@@ -117,14 +117,12 @@ else:
         aqi_level = record["AQI_level"]
         aqi_color = record["AQI_color"]
 
-        # ---------- Display name ----------
         st.markdown(f"""
             <div style="text-align: center; font-size: 27px; font-weight: 600; margin-bottom: 1rem;">
                 {name} ({district})
             </div>
         """, unsafe_allow_html=True)
 
-        # ---------- AQI Summary Box ----------
         st.markdown(f"""
             <div style="
                 background-color: {aqi_color};
@@ -145,19 +143,16 @@ else:
             </div>
         """, unsafe_allow_html=True)
 
-        # ---------- Map ----------
         st.subheader("แผนที่คุณภาพอากาศ")
 
         custom_scale = [
-            (0, "#00E400"),     # Good
-            (50, "#FFFF00"),    # Moderate
-            (100, "#FF7E00"),   # Sensitive
-            (150, "#FF0000"),   # Unhealthy
-            (200, "#8F3F97"),   # Very Unhealthy
-            (300, "#7E0023"),   # Hazardous
+            (0, "#00E400"),
+            (50, "#FFFF00"),
+            (100, "#FF7E00"),
+            (150, "#FF0000"),
+            (200, "#8F3F97"),
+            (300, "#7E0023"),
         ]
-
-        # color scale for Plotly (normalized 0.0 - 1.0)
         scale_values = [x[0] for x in custom_scale]
         scale_colors = [x[1] for x in custom_scale]
         norm_scale = [(v / max(scale_values), c) for v, c in zip(scale_values, scale_colors)]
@@ -171,10 +166,10 @@ else:
             color="AQI.aqi",
             color_continuous_scale=norm_scale,
             range_color=[0, 300],
-            size="AQI.aqi",          
-            size_max=18,             
-            zoom=9,                  
-            center={"lat": 13.75, "lon": 100.52},  
+            size="AQI.aqi",
+            size_max=18,
+            zoom=9,
+            center={"lat": 13.75, "lon": 100.52},
             height=550
         )
         fig.update_layout(
@@ -188,12 +183,7 @@ else:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # ---------- Table ----------
         st.subheader("ข้อมูลทั้งหมด")
         df_with_timestamp_index = df_latest[["timestamp", "nameTH", "district", "AQI.aqi", "PM25.value"]].set_index("timestamp")
-        st.dataframe(
-            df_with_timestamp_index,
-            use_container_width=True
-        )
-
+        st.dataframe(df_with_timestamp_index, use_container_width=True)
         st.caption(f"ข้อมูลล่าสุดเมื่อ: {latest_time}")

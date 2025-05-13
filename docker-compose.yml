@@ -10,6 +10,8 @@ services:
       LAKEFS_DATABASE_TYPE: "local"
       LAKEFS_AUTH_ENCRYPT_SECRET_KEY: "wait"
       LAKEFS_BLOCKSTORE_TYPE: "local"
+    networks:
+      - shared-net
 
   postgres:
     image: postgres:13-alpine
@@ -19,6 +21,8 @@ services:
       - POSTGRES_DB=prefect
     volumes:
       - postgres_data:/var/lib/postgresql@13.8/data
+    networks:
+      - shared-net
 
   prefect-server:
     build:
@@ -37,6 +41,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - shared-net
 
   prefect-worker:
     build:
@@ -53,6 +59,8 @@ services:
     deploy:
       mode: replicated
       replicas: 2
+    networks:
+      - shared-net
 
   jupyter:
     build:
@@ -64,13 +72,15 @@ services:
       - ./pipeline:/home/jovyan/work:rw
     environment:
       - PREFECT_API_URL=http://prefect-server:4200/api
+    networks:
+      - shared-net
 
   streamlit:
     build:
       context: ./prefect
       dockerfile: Dockerfile.jupyter
     ports:
-      - "8501:8501"
+      - "8502:8501"
     volumes:
       - ${PWD}/visualization:/home/jovyan/work:rw
     environment:
@@ -79,6 +89,12 @@ services:
     depends_on:
       - lakefs-dev
     entrypoint: ["streamlit", "run", "/home/jovyan/work/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    networks:
+      - shared-net
 
 volumes:
   postgres_data:
+
+networks:
+  shared-net:
+    external: true
