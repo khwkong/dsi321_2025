@@ -12,7 +12,6 @@ def fetch_data() -> list[dict]:
         url = 'http://air4thai.pcd.go.th/services/getNewAQI_JSON.php'
         response = requests.get(url)
         response.raise_for_status()
-
         data = response.json()
         return data['stations']
     except requests.RequestException as e:
@@ -24,12 +23,10 @@ def fetch_data() -> list[dict]:
 def data_processing(data: list[dict], districts_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
     df = pd.DataFrame(data)
 
-    # check
     if 'AQILast' not in df.columns:
         print("❌ 'AQILast' column not found in the data. Skipping this run.")
         return pd.DataFrame()
 
-    # check
     if df['AQILast'].dropna().empty:
         print("❌ 'AQILast' column is empty. Skipping this run.")
         return pd.DataFrame()
@@ -37,7 +34,6 @@ def data_processing(data: list[dict], districts_gdf: gpd.GeoDataFrame) -> pd.Dat
     print("Sample AQILast:")
     print(df['AQILast'].dropna().iloc[0])
 
-    # Flatten AQILast
     aqi_data = pd.json_normalize(df['AQILast'])
     df = pd.concat([df, aqi_data], axis=1)
 
@@ -54,13 +50,20 @@ def data_processing(data: list[dict], districts_gdf: gpd.GeoDataFrame) -> pd.Dat
         else:
             print(f"⚠️ Warning: Column '{col}' not found in DataFrame")
 
+    df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
+    df['long'] = pd.to_numeric(df['long'], errors='coerce')
+
     if 'time' in df.columns and 'date' in df.columns:
         df['time'] = df['time'].mode()[0]
         df['date'] = df['date'].mode()[0]
+
         df['timestamp'] = pd.to_datetime(df['date'] + ' ' + df['time'])
+        df['timestamp'] = df['timestamp'].dt.tz_localize('Asia/Bangkok')
     else:
         print("❌ Missing 'time' or 'date' columns.")
         return pd.DataFrame()
+
+    df['timestamp'] = df['timestamp'].dt.tz_localize(None)
 
     df['year'] = df['timestamp'].dt.year
     df['month'] = df['timestamp'].dt.month
@@ -81,25 +84,28 @@ def data_processing(data: list[dict], districts_gdf: gpd.GeoDataFrame) -> pd.Dat
         predicate='within'
     )
 
-    # del --เขต
     df['district'] = joined['dname'].str.replace("เขต", "", regex=False).str.strip()
     df = df[df['district'].notna()]
 
-    # sort
     selected_cols = [
         'timestamp', 'year', 'month', 'day', 'hour',
         'stationID', 'nameTH', 'areaTH', 'district', 'lat', 'long'
     ] + pollutant_cols
 
-    return df[selected_cols]
+    df = df[selected_cols]
+
+    df['stationID'] = df['stationID'].astype('string')
+    df['nameTH'] = df['nameTH'].astype('string')
+    df['areaTH'] = df['areaTH'].astype('string')
+    df['district'] = df['district'].astype('string')
+
+    return df
 
 
 @task
 def load_to_lakefs(df: pd.DataFrame, lakefs_s3_path: str, storage_options: dict):
     print(f"Saving to: {lakefs_s3_path}")
     print(f"Storage options: {storage_options}")
-
-    df['timestamp'] = df['timestamp'].dt.strftime('%d/%m/%Y %H:%M:%S')
 
     df.insert(0, 'index', range(1, len(df) + 1))
 
@@ -141,6 +147,7 @@ def main_flow():
             print("❌ Processed DataFrame is empty. Skipping load.")
             return
 
+        print(df.dtypes)
         print(df.head())
 
         ACCESS_KEY = "access_key"
@@ -164,7 +171,7 @@ def main_flow():
         load_to_lakefs(df, lakefs_s3_path, storage_options)
     except Exception as e:
         print(f"❌ Flow failed: {e}")
-        return  
+        return
 
 
 if __name__ == "__main__":

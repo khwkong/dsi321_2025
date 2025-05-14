@@ -6,7 +6,7 @@ import plotly.express as px
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from st_aggrid import GridOptionsBuilder, AgGrid
-from streamlit_autorefresh import st_autorefresh
+#from streamlit_autorefresh import st_autorefresh
 
 
 # ---------- Streamlit config ----------
@@ -21,7 +21,16 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st_autorefresh(interval=60000, key="refresh")
+#st_autorefresh(interval=85000, key="refresh")
+
+# ---------- Session cache control ----------
+if "last_load_time" not in st.session_state:
+    st.session_state.last_load_time = time.time()
+
+if time.time() - st.session_state.last_load_time > 75:
+    st.cache_data.clear()
+    st.session_state.last_load_time = time.time()
+    st.rerun()
 
 # ---------- lakeFS config ----------
 ACCESS_KEY = "access_key"
@@ -39,66 +48,9 @@ storage_options = {
     }
 }
 
-fs = fsspec.filesystem("s3", **storage_options)
+fs = fsspec.filesystem("s3", **storage_options, cache_regions=False)
 
-# ---------- Get latest date path ----------
-def get_latest_date_path():
-    paths = fs.glob(f"{base_path}/year=*/month=*/day=*")
-    if not paths:
-        return None
-
-    def extract_date(p):
-        parts = p.split("/")
-        y = int(parts[-3].split("=")[1])
-        m = int(parts[-2].split("=")[1])
-        d = int(parts[-1].split("=")[1])
-        return datetime(y, m, d)
-
-    latest_date_path = max(paths, key=extract_date)
-    return latest_date_path
-
-# ---------- Load all hourly data for latest date ----------
-@st.cache_data(ttl=60)
-def load_latest_day_data(max_retries=5):
-    now = datetime.now()
-    date_path = get_latest_date_path()
-    if not date_path:
-        return pd.DataFrame(), now
-
-    hour_paths = fs.glob(f"{date_path}/hour=*")
-    if not hour_paths:
-        return pd.DataFrame(), now
-
-    expected_files = len(hour_paths)
-    attempt = 0
-    while attempt < max_retries:
-        dfs = []
-        for p in hour_paths:
-            try:
-                df_part = pd.read_parquet(f"s3a://{p}", storage_options=storage_options)
-                dfs.append(df_part)
-            except Exception:
-                pass
-
-        if len(dfs) == expected_files:
-            break 
-        else:
-            attempt += 1
-            if attempt < max_retries:
-                time.sleep(3)
-
-    if len(dfs) != expected_files:
-        st.warning("⚠️ ข้อมูลยังมาไม่ครบ โหลดได้แค่บางส่วน")
-        raise ValueError("ไม่สามารถโหลดข้อมูลครบทุกไฟล์")
-
-    df = pd.concat(dfs, ignore_index=True)
-    df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
-    df['long'] = pd.to_numeric(df['long'], errors='coerce')
-    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
-
-    return df, now
-
-# ---------- AQI level helper ----------
+# ---------- Helper: AQI level ----------
 def get_aqi_level_and_color(aqi):
     if aqi <= 50:
         return "Good", "#00E400"
@@ -113,64 +65,137 @@ def get_aqi_level_and_color(aqi):
     else:
         return "Hazardous", "#7E0023"
 
-# ---------- Load and display ----------
-df, cache_time = load_latest_day_data()
+# ---------- Get latest path ----------
+def get_latest_date_path():
+    fs.invalidate_cache(f"{base_path}/")
+    paths = fs.glob(f"{base_path}/year=*/month=*/day=*")
+    if not paths:
+        return None
+    def extract_date(p):
+        parts = p.split("/")
+        y = int(parts[-3].split("=")[1])
+        m = int(parts[-2].split("=")[1])
+        d = int(parts[-1].split("=")[1])
+        return datetime(y, m, d)
+    return max(paths, key=extract_date)
 
-st.subheader("รายงานคุณภาพอากาศภายในกรุงเทพมหานคร")
+def get_latest_hour_key():
+    date_path = get_latest_date_path()
+    if not date_path:
+        return "no-data"
+    fs.invalidate_cache(f"{date_path}/")
+    hour_paths = fs.glob(f"{date_path}/hour=*")
+    #st.write("📂 hour_paths =", hour_paths) 
+    if not hour_paths:
+        return f"{date_path}-no-hour"
+    def extract_hour(p):
+        return int(p.split("/")[-1].split("=")[1])
+    latest_hour = max([extract_hour(p) for p in hour_paths])
+    return f"{date_path}-hour={latest_hour}"
+
+# ---------- Load data ----------
+@st.cache_data(ttl=75)
+def load_latest_day_data(key):
+    _ = key
+    now = datetime.now()
+    date_path = get_latest_date_path()
+    if not date_path:
+        return pd.DataFrame(), now, None, False
+    fs.invalidate_cache(f"{date_path}/")
+    hour_paths = fs.glob(f"{date_path}/hour=*")
+    if not hour_paths:
+        return pd.DataFrame(), now, None, False
+
+    expected_files = len(hour_paths)
+    dfs = []
+    for p in hour_paths:
+        try:
+            df_part = pd.read_parquet(f"s3a://{p}", storage_options=storage_options)
+            dfs.append(df_part)
+        except Exception:
+            pass
+    is_complete = len(dfs) == expected_files
+    if not is_complete:
+        return pd.DataFrame(), now, None, False
+
+    df = pd.concat(dfs, ignore_index=True)
+    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+    return df, now, None, True
+
+# ---------- Load & display ----------
+cache_key = get_latest_hour_key()
+df, cache_time, _, is_complete = load_latest_day_data(cache_key)
+
+if not is_complete:
+    st.warning("⚠️ ข้อมูลบางชั่วโมงยังมาไม่ครบ กำลังโหลดใหม่...")
+    time.sleep(10)
+    st.rerun()
+
+st.subheader("รายงานคุณภาพอากาศในกรุงเทพมหานคร")
 thai_time = cache_time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("Asia/Bangkok"))
-st.caption(f"🕑ข้อมูลล่าสุดเมื่อ: {thai_time.strftime('%d/%m/%Y %H:%M:%S')}")
+#st.caption(f"cache_key = {cache_key}")
+st.caption(f"🕑 ข้อมูลล่าสุดเมื่อ: {thai_time.strftime('%d/%m/%Y %H:%M:%S')}")
+#st.write("ล่าสุดจากฟังก์ชัน get_latest_hour_key():", get_latest_hour_key())
+#st.write("last_load_time", st.session_state.last_load_time)
+#st.write("current_time", time.time())
+
 
 if df.empty:
     st.error("ไม่พบข้อมูลในวันที่ล่าสุด")
+    st.stop()
+
+# ---------- Filter by latest hour ----------
+hour_paths = fs.glob(f"{get_latest_date_path()}/hour=*")
+def extract_hour(p): return int(p.split("/")[-1].split("=")[1])
+available_hours = [extract_hour(p) for p in hour_paths]
+latest_hour = max(available_hours)
+df_latest = df[df['timestamp'].dt.hour == latest_hour].copy()
+
+# ---------- Create search field ----------
+df_latest["AQI_level"], df_latest["AQI_color"] = zip(*df_latest["AQI.aqi"].apply(get_aqi_level_and_color))
+df_latest['search_key'] = df_latest['nameTH'] + " (" + df_latest['district'] + ")"
+search_list = sorted(df_latest['search_key'].unique())
+default_location = "สำนักงานเขตคลองเตย (คลองเตย)"
+selected_search = st.selectbox("ค้นหาชื่อสถานที่หรือเขต", search_list, index=search_list.index(default_location))
+
+# ---------- Display selected location ----------
+df_filtered = df_latest[df_latest['search_key'] == selected_search]
+if df_filtered.empty:
+    st.warning("❌ ไม่พบข้อมูลสำหรับพื้นที่ที่เลือก")
 else:
-    latest_time = df['timestamp'].max()
-    latest_hour = latest_time.hour
-    df_latest = df[df['timestamp'].dt.hour == latest_hour].copy()
+    record = df_filtered.iloc[0]
+    aqi = record['AQI.aqi']
+    pm25 = record['PM25.value']
+    name = record['nameTH']
+    district = record['district']
+    aqi_level = record["AQI_level"]
+    aqi_color = record["AQI_color"]
 
-    df_latest["AQI_level"], df_latest["AQI_color"] = zip(*df_latest["AQI.aqi"].apply(get_aqi_level_and_color))
-    df_latest['search_key'] = df_latest['nameTH'] + " (" + df_latest['district'] + ")"
-    search_list = sorted(df_latest['search_key'].unique())
-    default_location = "สำนักงานเขตคลองเตย (คลองเตย)"
-    selected_search = st.selectbox("ค้นหาสถานที่หรือเขต", search_list, index=search_list.index(default_location))
+    st.markdown(f"""
+        <div style="text-align: center; font-size: 27px; font-weight: 600; margin-bottom: 1rem;">
+            {name} ({district})
+        </div>
+    """, unsafe_allow_html=True)
 
-    df_filtered = df_latest[df_latest['search_key'] == selected_search]
-
-    if df_filtered.empty:
-        st.warning("❌ ไม่พบข้อมูลสำหรับพื้นที่ที่เลือก")
-    else:
-        record = df_filtered.iloc[0]
-        aqi = record['AQI.aqi']
-        pm25 = record['PM25.value']
-        name = record['nameTH']
-        district = record['district']
-        aqi_level = record["AQI_level"]
-        aqi_color = record["AQI_color"]
-
-        st.markdown(f"""
-            <div style="text-align: center; font-size: 27px; font-weight: 600; margin-bottom: 1rem;">
-                {name} ({district})
+    st.markdown(f"""
+        <div style="
+            background-color: {aqi_color};
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            text-align: center;
+            width: fit-content;
+            margin: 0 auto 2rem auto;
+            color: white;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        ">
+            <div style="font-size: 1.5rem; font-weight: bold;">
+                AQI {aqi} - {aqi_level}
             </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown(f"""
-            <div style="
-                background-color: {aqi_color};
-                padding: 1rem 2rem;
-                border-radius: 12px;
-                text-align: center;
-                width: fit-content;
-                margin: 0 auto 2rem auto;
-                color: white;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-            ">
-                <div style="font-size: 1.5rem; font-weight: bold;">
-                    AQI {aqi} - {aqi_level}
-                </div>
-                <div style="font-size: 1.2rem;">
-                    PM2.5 - {pm25} µg/m³
-                </div>
+            <div style="font-size: 1.2rem;">
+                PM2.5 - {pm25} µg/m³
             </div>
-        """, unsafe_allow_html=True)
+        </div>
+    """, unsafe_allow_html=True)
 
     # ---------- Dashboard ----------
     st.subheader("Dashboard")
@@ -259,31 +284,38 @@ else:
 
     with col_chart:
         st.markdown("###### 5 สถานที่ในกรุงเทพฯที่มีค่า AQI สูงที่สุด (today)")
-        top5 = df_latest.nlargest(5, "AQI.aqi")["nameTH"].unique()
+
+        exclude_names = ["สำนักงานเขตบางคอแหลม (Mobile)", "การเคหะชุมชนห้วยขวาง "]
+        df_latest_filtered = df_latest[~df_latest["nameTH"].isin(exclude_names)]
+
+        top5 = df_latest_filtered.nlargest(5, "AQI.aqi")["nameTH"].unique()
         df_top5 = df[df["nameTH"].isin(top5)].copy()
-        df_top5["hour"] = df_top5["timestamp"].dt.hour
-        df_top5["hour_str"] = df_top5["hour"].apply(lambda x: f"{x:02d}:00")
 
         fig_top5 = px.line(
             df_top5,
-            x="hour_str",
+            x="timestamp",
             y="AQI.aqi",
             color="nameTH",
             markers=True,
-            labels={"hour_str": "เวลา", "AQI.aqi": "ค่า AQI", "nameTH": "ชื่อสถานที่"},
+            labels={"timestamp": "เวลา", "AQI.aqi": "ค่า AQI", "nameTH": "ชื่อสถานที่"},
         )
+
         fig_top5.update_layout(
             height=350,
-            margin=dict(l=0, r=0, t=40, b=80),  
+            margin=dict(l=0, r=0, t=40, b=80),
             legend=dict(
-                orientation="h",        
+                orientation="h",
                 yanchor="bottom",
-                y=-1.1,                
+                y=-1.1,
                 xanchor="center",
                 x=0.5
             ),
-            font=dict(family="Kanit", size=12)         
+            font=dict(family="Kanit", size=12),
+            xaxis=dict(
+                tickformat="%H:%M", 
+            )
         )
+
         st.plotly_chart(fig_top5, use_container_width=True)
 
     # ---------- Latest hour table ----------
