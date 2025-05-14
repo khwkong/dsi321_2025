@@ -6,7 +6,7 @@ import plotly.express as px
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from st_aggrid import GridOptionsBuilder, AgGrid
-#from streamlit_autorefresh import st_autorefresh
+from streamlit_autorefresh import st_autorefresh
 
 
 # ---------- Streamlit config ----------
@@ -21,7 +21,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-#st_autorefresh(interval=85000, key="refresh")
+st_autorefresh(interval=85000, key="refresh")
 
 # ---------- Session cache control ----------
 if "last_load_time" not in st.session_state:
@@ -205,7 +205,7 @@ else:
     daily_mean_pm25 = df["PM25.value"].mean()
     level, color = get_aqi_level_and_color(daily_mean_aqi)
 
-    col1, col2, col3 = st.columns([1, 1, 3])
+    col1, col2, col3 = st.columns([1, 1, 2.7])
     with col1:
         st.markdown(f"""
             <div style="
