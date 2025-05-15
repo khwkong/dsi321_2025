@@ -12,3 +12,4 @@ fiona==1.9.5
 streamlit
 streamlit-autorefresh
 streamlit-aggrid
+statsmodels==0.14.2
