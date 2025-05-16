@@ -4,6 +4,8 @@ import pandas as pd
 from shapely.geometry import Point
 from pathlib import Path
 from prefect import flow, task
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 @task
@@ -57,18 +59,16 @@ def data_processing(data: list[dict], districts_gdf: gpd.GeoDataFrame) -> pd.Dat
         df['time'] = df['time'].mode()[0]
         df['date'] = df['date'].mode()[0]
 
-        df['timestamp'] = pd.to_datetime(df['date'] + ' ' + df['time'])
-        df['timestamp'] = df['timestamp'].dt.tz_localize('Asia/Bangkok')
+        current_time = datetime.now(ZoneInfo("Asia/Bangkok")).replace(minute=0, second=0, microsecond=0).replace(tzinfo=None)
+        df['timestamp'] = pd.Timestamp(current_time)
     else:
         print("❌ Missing 'time' or 'date' columns.")
         return pd.DataFrame()
-
-    df['timestamp'] = df['timestamp'].dt.tz_localize(None)
-
-    df['year'] = df['timestamp'].dt.year
-    df['month'] = df['timestamp'].dt.month
-    df['day'] = df['timestamp'].dt.day
-    df['hour'] = df['timestamp'].dt.hour
+    
+    df['year'] = current_time.year
+    df['month'] = current_time.month
+    df['day'] = current_time.day
+    df['hour'] = current_time.hour
 
     # geometry and spatial join
     stations_gdf = gpd.GeoDataFrame(

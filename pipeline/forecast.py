@@ -1,7 +1,7 @@
 #import fsspec
 import pandas as pd
 import numpy as np
-from datetime import timedelta
+from datetime import timedelta, datetime
 from prefect import flow, task
 from statsmodels.tsa.arima.model import ARIMA
 
@@ -30,18 +30,22 @@ def read_lakefs_data() -> pd.DataFrame:
 @task
 def forecast_pm25_aqi(df: pd.DataFrame) -> pd.DataFrame:
     print(f"🔎 Forecasting PM2.5 and AQI for all stations...")
+
     df = df[~df['nameTH'].isin(OUTLIER_STATIONS)]
     df = df[['timestamp', 'nameTH', 'PM25.value', 'AQI.aqi']].dropna()
+    df['load_time'] = datetime.now()
 
     forecasts = []
 
     for station in df['nameTH'].unique():
-        station_df = df[df['nameTH'] == station].sort_values("timestamp")
+        station_df = df[df['nameTH'] == station].sort_values(['timestamp', 'load_time'])
+        station_df = station_df.drop_duplicates(subset="timestamp", keep="last")
+
         if station_df.shape[0] < 24:
             print(f"⚠️ Skipping {station}: not enough data")
             continue
 
-        station_df = station_df.set_index("timestamp").asfreq('h') 
+        station_df = station_df.set_index("timestamp").asfreq('h')
 
         try:
             pm_model = ARIMA(station_df["PM25.value"], order=(1, 0, 1))
@@ -69,7 +73,7 @@ def forecast_pm25_aqi(df: pd.DataFrame) -> pd.DataFrame:
     if forecasts:
         forecast_df = pd.concat(forecasts).reset_index(drop=True)
         forecast_df['nameTH'] = forecast_df['nameTH'].astype('string')
-        forecast_df.insert(0, 'index', range(1, len(forecast_df) + 1)) 
+        forecast_df.insert(0, 'index', range(1, len(forecast_df) + 1))
         forecast_df = forecast_df[['index', 'timestamp', 'nameTH', 'AQI_forecast', 'PM25_forecast']]
     else:
         forecast_df = pd.DataFrame(columns=['index', 'timestamp', 'nameTH', 'AQI_forecast', 'PM25_forecast'])
