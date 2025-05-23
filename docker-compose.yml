@@ -55,6 +55,7 @@ services:
     volumes:
       - ./prefect/wait-for-server.sh:/wait-for-server.sh:ro
       - ./pipeline:/home/jovyan/work:rw
+      - ./data:/home/jovyan/data:rw
     entrypoint: ["/wait-for-server.sh"]
     deploy:
       mode: replicated
@@ -70,6 +71,7 @@ services:
       - "8888:8888"
     volumes:
       - ./pipeline:/home/jovyan/work:rw
+      - ./data:/home/jovyan/data:rw
     environment:
       - PREFECT_API_URL=http://prefect-server:4200/api
     networks:
