@@ -50,9 +50,16 @@ def save_data():
             print("Can't find, Day that have 24 hours.")
             return
 
+        # --- schema setting ---
+        columns_used = [
+            "timestamp", "stationID", "nameTH", "areaTH", "district",
+            "lat", "long", "AQI.aqi", "PM25.value", "year", "month", "day", "hour"
+        ]
+
         for file in valid_files:
             file_path = f"s3a://{file}"
             df = pd.read_parquet(file_path, storage_options=storage_options)
+            df = df[columns_used]
 
             # --- set path ---
             relative_path = file.replace(f"{repo}/{branch}/pm_data.parquet/", "")
