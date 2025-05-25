@@ -2,6 +2,7 @@ import pandas as pd
 import fsspec
 import os
 import re
+import shutil
 from collections import defaultdict
 
 
@@ -56,23 +57,37 @@ def save_data():
             "lat", "long", "AQI.aqi", "PM25.value", "year", "month", "day", "hour"
         ]
 
+        dfs = []
+
         for file in valid_files:
             file_path = f"s3a://{file}"
             df = pd.read_parquet(file_path, storage_options=storage_options)
             df = df[columns_used]
 
-            # --- set path ---
-            relative_path = file.replace(f"{repo}/{branch}/pm_data.parquet/", "")
+            int_columns = ["year", "month", "day", "hour"]
+            df[int_columns] = df[int_columns].astype("int32")
 
-            # --- local path ---
-            local_path = os.path.join("/home/jovyan/data/data.parquet", relative_path)
-            local_dir = os.path.dirname(local_path)
-            os.makedirs(local_dir, exist_ok=True)
+            dfs.append(df)
 
-            df.to_parquet(local_path, index=False)
-            print(f"💾 saved {local_path}")
+        df_all = pd.concat(dfs, ignore_index=True)
 
-        print("✅ ALL done !")
+        local_base_dir = "/home/jovyan/data/data.parquet"
+
+        # --- delete old folder --- 
+        if os.path.exists(local_base_dir):
+            shutil.rmtree(local_base_dir)
+
+        os.makedirs(local_base_dir, exist_ok=True)
+
+        df_all.to_parquet(
+            local_base_dir,
+            partition_cols=["year", "month", "day", "hour"],
+            index=False,
+            engine="pyarrow"
+        )
+
+        print(f"💾 Saved partitioned parquet dataset at {local_base_dir}")
+        print("✅ ALL done!")
 
     except Exception as e:
         print(f"❌ Error: {str(e)}")
