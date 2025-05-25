@@ -61,10 +61,6 @@ The following table describes the structure of the **processed dataset** used fo
 | `long`       | float     | Longitude |
 | `AQI.aqi`    | int       | Air Quality Index (0–500) |
 | `PM25.value` | float     | PM2.5 concentration (µg/m³) |
-| `year`       | int       | Year of the measurement |
-| `month`      | int       | Month of the measurement |
-| `day`        | int       | Day of the measurement |
-| `hour`       | int       | Hour of the measurement (0–23) |
 
 ## ✅ Dataset Quality Assurance
 
