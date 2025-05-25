@@ -32,6 +32,7 @@ def forecast_pm25_aqi(df: pd.DataFrame) -> pd.DataFrame:
     print(f"🔎 Forecasting PM2.5 and AQI for all stations...")
 
     df = df[~df['nameTH'].isin(OUTLIER_STATIONS)]
+    df = df[(df['AQI.aqi'] >= 0) & (df['PM25.value'] >= 0)]
     df = df[['timestamp', 'nameTH', 'PM25.value', 'AQI.aqi']].dropna()
     df['load_time'] = datetime.now()
 

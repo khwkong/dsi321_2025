@@ -167,6 +167,7 @@ latest_hour = max(available_hours)
 df_latest = df[df['timestamp'].dt.hour == latest_hour].copy()
 
 # ---------- Create search field ----------
+df_latest = df_latest[df_latest["AQI.aqi"] >= 0].copy()
 df_latest["AQI_level"], df_latest["AQI_color"] = zip(*df_latest["AQI.aqi"].apply(get_aqi_level_and_color))
 df_latest['search_key'] = df_latest['nameTH'] + " (" + df_latest['district'] + ")"
 search_list = sorted(df_latest['search_key'].unique())
