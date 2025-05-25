@@ -77,7 +77,7 @@ To ensure the reliability and accuracy of the dataset used in this project, we a
 - ✅ No **duplicated rows** for any station  
 
 📘 **Full Quality Check Details**    
-▶️ View the full notebook here: **[check_data_quality.ipynb](data/check_data_quality.ipynb)**
+▶️ **View the full notebook here: [check_data_quality.ipynb](data/check_data_quality.ipynb)**
 
 ## 🚀 Getting Started
 
@@ -136,7 +136,7 @@ python upload.py
 
 This script will:
 - Locate the most recent folder inside `/home/jovyan/data/data.parquet/year=*/month=*/day=*/`
-- Upload latest day `.parquet` files to the `dust-concentration` repository in LakeFS
+- Upload the latest day's `.parquet` files to the `dust-concentration` repository in LakeFS
 - Overwrite existing files if necessary
 
 ### 5. 📈 Generate Initial Forecast Data (Required for Dashboard)
@@ -154,8 +154,8 @@ docker exec -it dsi321-jupyter-1 bash
 Then run the necessary scripts:
 
 ```bash
-python pipeline/getdata.py
-python pipeline/forecast.py
+python getdata.py
+python forecast.py
 ```
 
 #### Option B: Trigger Flows from the Prefect UI
@@ -204,7 +204,7 @@ python deploy_ml.py
 
 The dashboard provides a city-wide overview of real-time and forecasted air quality in Bangkok.
 
-### Components:
+### 🔗 Components:
 
 - **Station Selector**: Choose a station to view details
 - **Real-time Scorecard**: Latest AQI and PM2.5 for selected station
@@ -245,13 +245,17 @@ lakefs://dust-concentration/main/forecast/forecast.parquet
 │   ├── SCHEMA.md                     # Dataset schema documentation
 │   └── check_data_quality.ipynb      # Notebook for validating data quality
 │
+├── img/                            # Images for README or dashboard preview 
+|   └── dashboard_demo.png/           # Screenshot of the Streamlit dashboard
+|
 ├── pipeline/                       # Python scripts for ingestion & forecasting
 │   ├── bangkok_districts.geojson     # GeoJSON file for Bangkok map visualization
 │   ├── deploy.py                     # Prefect flow: fetch real-time data from API
 │   ├── deploy_ml.py                  # Prefect flow: run ARIMA forecasts per station
 │   ├── forecast.py                   # ARIMA model for forecasting
 │   ├── getdata.py                    # Script to retrieve and transform API data
-│   └── savedata.py                   # Dowload entire LakeFS repository contents to local directory
+│   └── savedata.py                   # Dowload entire LakeFS repository contents to local 
+|   └── upload.py                     # Upload latest day's `.parquet` files to LakeFS
 │
 ├── prefect/                        # Prefect-related configs and Docker setup
 │   ├── Dockerfile.jupyter            # Dockerfile for JupyterLab environment
